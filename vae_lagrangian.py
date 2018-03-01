@@ -10,7 +10,6 @@ from limited_mnist import LimitedMnist
 from abstract_network import *
 
 parser = argparse.ArgumentParser()
-# python coco_transfer2.py --db_path=../data/coco/coco_seg_transfer40_30_299 --batch_size=64 --gpu='0' --type=mask
 
 parser.add_argument('-g', '--gpu', type=str, default='1', help='GPU to use')
 parser.add_argument('-n', '--train_size', type=int, default=50000, help='Number of samples for training')
@@ -20,8 +19,6 @@ parser.add_argument('-m', '--mi', type=float, default=-5.0, help='Information Pr
 parser.add_argument('--lagrangian', action='store_true')
 args = parser.parse_args()
 
-
-# python mmd_vae_eval.py --reg_type=elbo --gpu=0 --train_size=1000
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 batch_size = 200
 
@@ -128,7 +125,7 @@ loss_all = lambda1 * loss_nll + (lambda2 + args.mi - lambda1) * loss_mmd + (lamb
 lambda_vars = [lambda1, lambda2]
 model_vars = [var for var in tf.global_variables() if 'encoder' in var.name or 'decoder' in var.name]
 trainer = tf.train.AdamOptimizer(1e-4).minimize(loss_all, var_list=model_vars)
-lambda_update = tf.train.GradientDescentOptimizer(2e-4).minimize(-loss_all, var_list=lambda_vars)
+lambda_update = tf.train.GradientDescentOptimizer(1e-4).minimize(-loss_all, var_list=lambda_vars)
 
 limited_mnist = LimitedMnist(args.train_size)
 
