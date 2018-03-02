@@ -112,6 +112,13 @@ def fc_relu(inputs, num_outputs):
     fc = tf.nn.relu(fc)
     return fc
 
+def fc_tanh(inputs, num_outputs):
+    fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
+                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
+                                           activation_fn=tf.identity)
+    fc = tf.nn.tanh(fc)
+    return fc
 
 # Convert a numpy array of shape [batch_size, height, width, 1] into a displayable array
 # of shape [height*sqrt(batch_size, width*sqrt(batch_size))] by tiling the images
