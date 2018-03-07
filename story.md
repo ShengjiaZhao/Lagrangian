@@ -18,10 +18,12 @@ Consider the following optimization problem, which is a general primal form with
 $$
 \begin{align}
 & \min_\theta -\alpha I_q(x; z) \\
-\text{s.t.} \quad & \mathbb{E}_{x \sim q(x)}[\mathrm{KL}(q(x|z) \Vert p(x|z)))] \leq \epsilon_1 \\
+\text{s.t.} \quad & \mathbb{E}_{x \sim q(x), z \sim q(z|x)}[\mathrm{KL}(q(x|z) \Vert p(x|z)))] \leq \epsilon_1 \\
 &  \mathbb{E}_{x \sim q(x), z \sim q(z|x)}[\mathrm{KL}(q(z)\Vert p(z)))] \leq \epsilon_2
 \end{align}
 $$
+(Need to reformulate the constraints to make it tractable — writing KL inside expectation is also wrong)
+
 This has the following dual form:
 $$
 \min_\theta \max_{\lambda > 0} -\alpha I_q(x; z) + \lambda_1(\mathbb{E}_{x \sim q(x)}[\mathrm{KL}(q(x|z) \Vert p(x|z)))] - \epsilon_1) +\lambda_2 (  \mathbb{E}_{x \sim q(x), z \sim q(z|x)}[\mathrm{KL}(q(z)\Vert p(z)))] - \epsilon_2)

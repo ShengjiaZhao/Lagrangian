@@ -18,6 +18,8 @@ parser.add_argument('-e2', '--epsilon2', type=float, default=0.15)
 parser.add_argument('-m', '--mi', type=float, default=-5.0, help='Information Preference')
 parser.add_argument('-l1', '--lambda1', type=float, default=1.0)
 parser.add_argument('-l2', '--lambda2', type=float, default=10.0)
+parser.add_argument('-z', type=int, default=5)
+parser.add_argument('-t', type=str, default='cnn')
 parser.add_argument('--lagrangian', action='store_true')
 args = parser.parse_args()
 
@@ -42,61 +44,59 @@ else:
     name_append = ''
 
 if args.lagrangian:
-    log_path = make_model_path('%.2f_%.2f_%.2f%s' % (args.mi, args.epsilon1, args.epsilon2, name_append))
+    log_path = make_model_path('%s/%d/%.2f_%.2f_%.2f%s' % (args.t, args.z, args.mi, args.epsilon1, args.epsilon2, name_append))
 else:
-    log_path = make_model_path('%.2f_%.2f_%.2f%s' % (args.mi, args.lambda1, args.lambda2, name_append))
+    log_path = make_model_path('%s/%d/%.2f_%.2f_%.2f%s' % (args.t, args.z, args.mi, args.lambda1, args.lambda2, name_append))
 
 # Encoder and decoder use the DC-GAN architecture
 # 28 x 28 x 1
 def encoder(x, z_dim):
-    with tf.variable_scope('encoder'):
-        conv = conv2d_lrelu(x, 64, 4, 2)   # None x 14 x 14 x 64
-        conv = conv2d_lrelu(conv, 128, 4, 2)   # None x 7 x 7 x 128
-        conv = tf.reshape(conv, [-1, np.prod(conv.get_shape().as_list()[1:])]) # None x (7x7x128)
-        fc = fc_lrelu(conv, 1024)
-        mean = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.identity)
-        stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.sigmoid)
-        stddev = tf.maximum(stddev, 0.05)
-        mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
-        return mean, stddev
+    if args.t == 'cnn':
+        with tf.variable_scope('encoder'):
+            conv = conv2d_lrelu(x, 64, 4, 2)   # None x 14 x 14 x 64
+            conv = conv2d_lrelu(conv, 128, 4, 2)   # None x 7 x 7 x 128
+            conv = tf.reshape(conv, [-1, np.prod(conv.get_shape().as_list()[1:])]) # None x (7x7x128)
+            fc = fc_lrelu(conv, 1024)
+            mean = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.identity)
+            stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.sigmoid)
+            stddev = tf.maximum(stddev, 0.05)
+            mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
+            return mean, stddev
+    else:
+        with tf.variable_scope('encoder'):
+            x = tf.reshape(x, [-1, 784])
+            fc1 = fc_tanh(x, 1024)
+            fc2 = fc_tanh(fc1, 1024)
+            mean = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.identity)
+            stdv = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.exp)
+            stdv = tf.maximum(stdv, 0.05)
+            mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
+            return mean, stdv
 
 
 def decoder(z, reuse=False):
-    with tf.variable_scope('decoder') as vs:
-        if reuse:
-            vs.reuse_variables()
-        fc = fc_relu(z, 1024)
-        fc = fc_relu(fc, 7*7*128)
-        conv = tf.reshape(fc, tf.stack([tf.shape(fc)[0], 7, 7, 128]))
-        conv = conv2d_t_relu(conv, 64, 4, 2)
-        mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.sigmoid)
-        mean = tf.maximum(tf.minimum(mean, 0.995), 0.005)
-        return mean
-
-
-# def encoder(x, z_dim):
-#     with tf.variable_scope('encoder'):
-#         x = tf.reshape(x, [-1, 784])
-#         fc1 = fc_tanh(x, 1024)
-#         fc2 = fc_tanh(fc1, 1024)
-#         mean = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.identity)
-#         stdv = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.exp)
-#         stdv = tf.maximum(stdv, 0.05)
-#         mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
-#         return mean, stdv
-#
-#
-# def decoder(z, reuse=False):
-#     with tf.variable_scope('decoder', reuse=reuse):
-#         fc1 = fc_tanh(z, 1024)
-#         fc2 = fc_tanh(fc1, 1024)
-#         logits = tf.contrib.layers.fully_connected(fc2, 784, activation_fn=tf.identity)
-#         logits = tf.reshape(logits, [-1, 28, 28, 1])
-#         return tf.minimum(tf.maximum(tf.sigmoid(logits), 0.005), 0.995)
+    if args.t == 'cnn':
+        with tf.variable_scope('decoder') as vs:
+            if reuse:
+                vs.reuse_variables()
+            fc = fc_relu(z, 1024)
+            fc = fc_relu(fc, 7*7*128)
+            conv = tf.reshape(fc, tf.stack([tf.shape(fc)[0], 7, 7, 128]))
+            conv = conv2d_t_relu(conv, 64, 4, 2)
+            mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.sigmoid)
+            mean = tf.maximum(tf.minimum(mean, 0.995), 0.005)
+            return mean
+    else:
+        with tf.variable_scope('decoder', reuse=reuse):
+            fc1 = fc_tanh(z, 1024)
+            fc2 = fc_tanh(fc1, 1024)
+            logits = tf.contrib.layers.fully_connected(fc2, 784, activation_fn=tf.identity)
+            logits = tf.reshape(logits, [-1, 28, 28, 1])
+            return tf.minimum(tf.maximum(tf.sigmoid(logits), 0.005), 0.995)
 
 
 # Build the computation graph for training
-z_dim = 5
+z_dim = args.z
 x_dim = [28, 28, 1]
 train_x = tf.placeholder(tf.float32, shape=[None] + x_dim)
 train_zmean, train_zstddev = encoder(train_x, z_dim)
@@ -125,6 +125,20 @@ def compute_mmd(x, y):   # [batch_size, z_dim] [batch_size, z_dim]
     y_kernel = compute_kernel(y, y)
     xy_kernel = compute_kernel(x, y)
     return tf.reduce_mean(x_kernel) + tf.reduce_mean(y_kernel) - 2 * tf.reduce_mean(xy_kernel)
+
+
+def stein_gradient(x, x_grad, sigma):
+    x_size = x.get_shape()[0].value
+    x_dim = x.get_shape()[1].value
+    xm = tf.reshape(x, [1, x_size, x_dim])
+    xm = tf.tile(xm, (x_size, 1, 1))
+    ym = tf.reshape(x, [x_size, 1, x_dim])
+    ym = tf.tile(ym, (1, x_size, 1))
+    km = tf.exp(-tf.reduce_sum(tf.square(xm - ym), axis=2) / (2.0 * sigma * sigma * x_dim))
+    tk = tf.tile(tf.expand_dims(km, axis=2), [1, 1, x_dim])
+    km_grad = -(ym - xm) / (sigma * sigma * x_dim) * tk
+    km_grad = tf.reduce_sum(km_grad, axis=1)
+    return (tf.matmul(km, x_grad) + km_grad) / x_size
 
 
 # Compare the generated z with true samples from a standard Gaussian, and compute their MMD distance
@@ -158,8 +172,10 @@ loss_all = lambda1 * loss_nll + (lambda2 + args.mi - lambda1) * loss_mmd\
 
 lambda_vars = [lambda1, lambda2]
 model_vars = [var for var in tf.global_variables() if 'encoder' in var.name or 'decoder' in var.name]
+# optimizer = tf.train.AdamOptimizer(1e-4)
+# grads = tf.gradients(loss_all, model_vars)
 trainer = tf.train.AdamOptimizer(1e-4).minimize(loss_all, var_list=model_vars)
-lambda_update = tf.train.GradientDescentOptimizer(1e-5).minimize(-loss_all, var_list=lambda_vars)
+lambda_update = tf.train.GradientDescentOptimizer(1e-4).minimize(-loss_all, var_list=lambda_vars)
 
 limited_mnist = LimitedMnist(args.train_size)
 
