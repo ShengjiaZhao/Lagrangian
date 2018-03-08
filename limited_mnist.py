@@ -28,6 +28,13 @@ class LimitedMnist:
         else:
             return self.data[prev_ptr:self.data_ptr]
 
+    def next_full_batch(self, batch_size):
+        batch_x = self.full_mnist.train.next_batch(batch_size)[0]
+        batch_x = np.reshape(batch_x, [-1, 28, 28, 1])
+        if self.binary:
+            batch_x = self.binarize(batch_x)
+        return batch_x
+
     def test_batch(self, batch_size):
         batch_x = self.full_mnist.test.next_batch(batch_size)[0]
         batch_x = np.reshape(batch_x, [-1, 28, 28, 1])
