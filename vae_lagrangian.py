@@ -8,6 +8,7 @@ import argparse
 from scipy import misc as misc
 from limited_mnist import LimitedMnist
 from abstract_network import *
+from scipy.spatial.distance import pdist
 
 parser = argparse.ArgumentParser()
 
@@ -137,6 +138,7 @@ def tf_stein_gradient(x_sample, sigma_sqr):
     return tf.div(tf.reduce_sum(weighted_gradient, axis=0) +
                   tf.reduce_sum(kernel_grad_matrix, axis=1), z_size)
 
+sigma = tf.placeholder(tf.float32, shape=[])
 
 # Compare the generated z with true samples from a standard Gaussian, and compute their MMD distance
 true_samples = tf.random_normal(tf.stack([batch_size, z_dim]))
@@ -152,7 +154,7 @@ nll_per_sample = -tf.reduce_sum(tf.log(train_xmean) * train_x + tf.log(1 - train
                                 axis=(1, 2, 3))
 loss_nll = tf.reduce_mean(nll_per_sample)
 
-stein_grad = tf.stop_gradient(tf_stein_gradient(tf.reshape(train_z, [batch_size, z_dim]), 1.0))
+stein_grad = tf.stop_gradient(tf_stein_gradient(tf.reshape(train_z, [batch_size, z_dim]), sigma))
 loss_stein = -tf.reduce_sum(tf.multiply(train_z, stein_grad))
 
 if args.lagrangian:
@@ -197,24 +199,34 @@ summary_writer = tf.summary.FileWriter(log_path)
 
 # Start training
 # plt.ion()
+bx = limited_mnist.next_batch(batch_size)
+bx = np.reshape(bx, [-1] + x_dim)
+tz = sess.run(train_z, feed_dict={train_x: bx})
 for i in range(500000):
     bx = limited_mnist.next_batch(batch_size)
     bx = np.reshape(bx, [-1] + x_dim)
 
+    pd = pdist(tz)
+    s = np.median(pd) ** 2 / np.log(batch_size)
+
     if args.lagrangian:
-        sess.run([trainer, lambda_update], feed_dict={train_x: bx})
+        tz, _, _ = sess.run([train_z, trainer, lambda_update], feed_dict={train_x: bx, sigma: s})
     else:
-        sess.run(trainer, feed_dict={train_x: bx})
+        tz, _, _ = sess.run([train_z, trainer], feed_dict={train_x: bx, sigma: s})
     sess.run(lambda_clip)
 
     if i % 100 == 0:
-        merged = sess.run(train_summary, feed_dict={train_x: bx})
+        pd = pdist(tz)
+        s = np.median(pd) ** 2 / np.log(batch_size)
+        merged = sess.run(train_summary, feed_dict={train_x: bx, sigma: s})
         summary_writer.add_summary(merged, i)
         if i % 1000 == 0:
             print("Iteration %d" % i)
     if i % 500 == 0:
+        pd = pdist(tz)
+        s = np.median(pd) ** 2 / np.log(batch_size)
         bx = limited_mnist.next_batch(100)
         bz = np.random.normal(size=(100, z_dim))
-        summary_val = sess.run(sample_summary, feed_dict={train_x: bx, gen_z: bz})
+        summary_val = sess.run(sample_summary, feed_dict={train_x: bx, gen_z: bz, sigma: s})
         summary_writer.add_summary(summary_val, i)
 
