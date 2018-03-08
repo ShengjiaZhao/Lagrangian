@@ -21,22 +21,6 @@ def variational_posterior(x, z_dim):
         return mean, stddev
 
 
-def calibrate_scale(x_sample):
-    name = 'calibration'
-    c_lb = tf.get_variable('%s_lb' % name, shape=[28, 28, 1], dtype=tf.float32, initializer=tf.constant_initializer(0.3))
-    c_ub = tf.get_variable('%s_ub' % name, shape=[28, 28, 1], dtype=tf.float32, initializer=tf.constant_initializer(0.7))
-    x_mean = x_sample * tf.minimum(c_ub, 0.995) + (1 - x_sample) * tf.maximum(c_lb, 0.005)
-    return x_mean, [c_lb, c_ub]
-
-
-def calibrate_conv(x_sample):
-    with tf.variable_scope('calib') as vs:
-        conv1 = conv2d_lrelu(x_sample, 16, 3, 1)
-        x_mean = tf.contrib.layers.conv2d(conv1, 1, 3, 1, activation_fn=tf.sigmoid)
-        x_mean = tf.maximum(tf.minimum(x_mean, 0.995), 0.005)
-    return x_mean, [var for var in tf.global_variables() if 'calib' in var.name]
-
-
 # Evaluate the log likelihood on test data
 def compute_log_sum(val):
     min_val = np.min(val, axis=0, keepdims=True)
@@ -44,7 +28,7 @@ def compute_log_sum(val):
 
 
 class LLEvaluator:
-    def __init__(self, model, calibrate=False):
+    def __init__(self, model):
         """ model must have the following attributes:
             model.get_generator(z): given input z produce the corresponding generated samples/sample mean
             model.sess: holds the parameters of the model
@@ -53,51 +37,30 @@ class LLEvaluator:
         """
         self.model = model
         self.sess = model.sess
-        self.calibrate = calibrate
         self.x = tf.placeholder(shape=[None, 28, 28, 1], dtype=tf.float32)
         z_mean, z_stddev = variational_posterior(self.x, model.z_dim)
         z_sample = z_mean + tf.multiply(z_stddev,
                                         tf.random_normal(tf.stack([tf.shape(self.x)[0], model.z_dim])))
-        if calibrate:
-            x_sample = model.get_generator(z_sample)
-            x_mean, calib_var = calibrate_conv(x_sample)
-        else:
-            x_mean = model.get_generator(z_sample)
+        x_logit = model.get_generator(z_sample)
 
-        nll_per_sample = -tf.reduce_sum(tf.log(x_mean) * self.x + tf.log(1 - x_mean) * (1 - self.x), axis=(1, 2, 3))
+        nll_per_sample = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=self.x, logits=x_logit), axis=(1, 2, 3))
         self.loss_nll = tf.reduce_mean(nll_per_sample)
 
         # ELBO loss divided by input dimensions
-        elbo_per_sample = tf.reduce_sum(-tf.log(z_stddev) + 0.5 * tf.square(z_stddev) +
-                                             0.5 * tf.square(z_mean) - 0.5, axis=1)
+        elbo_per_sample = tf.reduce_sum(-tf.log(z_stddev) + 0.5 * tf.square(z_stddev) + 0.5 * tf.square(z_mean) - 0.5, axis=1)
         self.loss_elbo = tf.reduce_mean(elbo_per_sample)
 
         self.is_estimator = nll_per_sample + elbo_per_sample
 
         vi_var = [var for var in tf.global_variables() if 'vi_posterior' in var.name]
         with tf.variable_scope('adam_train'):
-            if calibrate:
-                self.calib_train = tf.train.AdamOptimizer(1e-4).minimize(self.loss_nll + self.loss_elbo, var_list=calib_var + vi_var)
             self.vi_train = tf.train.AdamOptimizer(1e-4).minimize(self.loss_nll + self.loss_elbo, var_list=vi_var)
         adam_var = [var for var in tf.global_variables() if 'adam_train' in var.name]
 
-        if calibrate:
-            self.init_op = tf.variables_initializer(vi_var + calib_var + adam_var)
-        else:
-            self.init_op = tf.variables_initializer(vi_var + adam_var)
+        self.init_op = tf.variables_initializer(vi_var + adam_var)
 
     def train(self):
         self.sess.run(self.init_op)
-        # Calibrate the generative model on the training set
-        if self.calibrate:
-            for iter in range(10000):
-                bx = self.model.dataset.next_batch(100)
-                nll, elbo, _ = self.sess.run([self.loss_nll, self.loss_elbo, self.calib_train], feed_dict={self.x: bx})
-                if iter % 2000 == 0:
-                    test_bx = self.model.dataset.next_test_batch(100)
-                    test_nll, test_elbo = self.sess.run([self.loss_nll, self.loss_elbo], feed_dict={self.x: test_bx})
-                    print("Calibration iter %d, nll=%.4f/%.4f, elbo=%.4f/%.4f" % (iter, nll, test_nll, elbo, test_elbo))
-
         # Learn variational inference on test set
         for iter in range(10000):
             bx = self.model.dataset.next_test_batch(100)
