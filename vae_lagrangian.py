@@ -10,6 +10,7 @@ from limited_mnist import LimitedMnist
 from abstract_network import *
 from scipy.spatial.distance import pdist
 
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument('-g', '--gpu', type=str, default='1', help='GPU to use')
@@ -162,7 +163,7 @@ if args.lagrangian:
 else:
     lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda1))
 # Cannot simply use clipping here because once at max/min there is no more gradient
-lambda_ub = tf.assign(lambda1, tf.minimum(lambda1, 100.0))
+lambda_ub = tf.assign(lambda1, tf.minimum(lambda1, 1000.0))
 lambda_lb = tf.assign(lambda1, tf.maximum(lambda1, 0.0))  # Consider lower bounding at args.mi
 lambda_clip = [lambda_ub, lambda_lb]
 
