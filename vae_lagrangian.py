@@ -123,20 +123,19 @@ def compute_mmd(x, y):   # [batch_size, z_dim] [batch_size, z_dim]
 
 # x_sample is input of size (batch_size, dim)
 def tf_stein_gradient(x_sample, sigma_sqr):
-    x_size = x_sample.get_shape()[0].value
-    x_dim = x_sample.get_shape()[1].value
-    x_sample = tf.reshape(x_sample, [x_size, 1, x_dim])
-    sample_mat_y = tf.tile(x_sample, (1, x_size, 1))
+    z_size = x_sample.get_shape()[0].value
+    x_sample = tf.reshape(x_sample, [z_size, 1, z_dim])
+    sample_mat_y = tf.tile(x_sample, (1, z_size, 1))
     sample_mat_x = tf.transpose(sample_mat_y, perm=(1, 0, 2))
-    kernel_matrix = tf.exp(-tf.reduce_sum(tf.square(sample_mat_x - sample_mat_y), axis=2) / (2 * sigma_sqr * x_dim))
+    kernel_matrix = tf.exp(-tf.reduce_sum(tf.square(sample_mat_x - sample_mat_y), axis=2) / (2 * sigma_sqr * z_dim))
     # np.multiply(-self.kernel(x, y), np.divide(x - y, self.sigma_sqr))./
-    tiled_kernel = tf.tile(tf.reshape(kernel_matrix, [x_size, x_size, 1]), [1, 1, x_dim])
-    kernel_grad_matrix = tf.multiply(tiled_kernel, tf.div(sample_mat_y - sample_mat_x, sigma_sqr * x_dim))
-    gradient = tf.reshape(-x_sample, [x_size, 1, x_dim])  # Gradient of standard Gaussian
-    tiled_gradient = tf.tile(gradient, [1, x_size, 1])
+    tiled_kernel = tf.tile(tf.reshape(kernel_matrix, [z_size, z_size, 1]), [1, 1, z_dim])
+    kernel_grad_matrix = tf.multiply(tiled_kernel, tf.div(sample_mat_y - sample_mat_x, sigma_sqr * z_dim))
+    gradient = tf.reshape(-x_sample, [z_size, 1, z_dim])  # Gradient of standard Gaussian
+    tiled_gradient = tf.tile(gradient, [1, z_size, 1])
     weighted_gradient = tf.multiply(tiled_kernel, tiled_gradient)
     return tf.div(tf.reduce_sum(weighted_gradient, axis=0) +
-                  tf.reduce_sum(kernel_grad_matrix, axis=1), x_size)
+                  tf.reduce_sum(kernel_grad_matrix, axis=1), z_size)
 
 
 # Compare the generated z with true samples from a standard Gaussian, and compute their MMD distance
@@ -153,7 +152,7 @@ nll_per_sample = -tf.reduce_sum(tf.log(train_xmean) * train_x + tf.log(1 - train
                                 axis=(1, 2, 3))
 loss_nll = tf.reduce_mean(nll_per_sample)
 
-stein_grad = tf.stop_gradient(tf_stein_gradient(train_z, 1.0))
+stein_grad = tf.stop_gradient(tf_stein_gradient(tf.reshape(train_z, [batch_size, z_dim]), 1.0))
 loss_stein = -tf.reduce_sum(tf.multiply(train_z, stein_grad))
 
 if args.lagrangian:
