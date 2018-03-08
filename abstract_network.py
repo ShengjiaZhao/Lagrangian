@@ -18,7 +18,7 @@ fc_layer = tf.contrib.layers.fully_connected
 
 def conv2d_bn_lrelu(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d(inputs, num_outputs, kernel_size, stride,
-                                           weights_initializer=tf.contrib.layers.xavier_initializer,
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                            activation_fn=tf.identity)
     conv = tf.contrib.layers.batch_norm(conv)
@@ -28,7 +28,7 @@ def conv2d_bn_lrelu(inputs, num_outputs, kernel_size, stride):
 
 def conv2d_lrelu(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d(inputs, num_outputs, kernel_size, stride,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            activation_fn=tf.identity)
     conv = lrelu(conv)
     return conv
@@ -36,7 +36,7 @@ def conv2d_lrelu(inputs, num_outputs, kernel_size, stride):
 
 def conv2d_t_bn_relu(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d_transpose(inputs, num_outputs, kernel_size, stride,
-                                                     weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                      weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                                      activation_fn=tf.identity)
     conv = tf.contrib.layers.batch_norm(conv)
@@ -45,7 +45,7 @@ def conv2d_t_bn_relu(inputs, num_outputs, kernel_size, stride):
 
 def conv2d_t_relu(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d_transpose(inputs, num_outputs, kernel_size, stride,
-                                                     weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                      weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                                      activation_fn=tf.identity)
     conv = tf.nn.relu(conv)
@@ -53,7 +53,7 @@ def conv2d_t_relu(inputs, num_outputs, kernel_size, stride):
 
 def conv2d_t_bn_lrelu(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d_transpose(inputs, num_outputs, kernel_size, stride,
-                                                     weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                      weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                                      activation_fn=tf.identity)
     conv = tf.contrib.layers.batch_norm(conv)
@@ -63,7 +63,7 @@ def conv2d_t_bn_lrelu(inputs, num_outputs, kernel_size, stride):
 
 def conv2d_t_bn(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d_transpose(inputs, num_outputs, kernel_size, stride,
-                                                     weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                                     weights_initializer=tf.contrib.layers.xavier_initializer(),
                                                      weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                                      activation_fn=tf.identity)
     conv = tf.contrib.layers.batch_norm(conv)
@@ -72,7 +72,7 @@ def conv2d_t_bn(inputs, num_outputs, kernel_size, stride):
 
 def fc_bn(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                            activation_fn=tf.identity)
     fc = tf.contrib.layers.batch_norm(fc)
@@ -80,7 +80,7 @@ def fc_bn(inputs, num_outputs):
 
 def fc_bn_lrelu(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                            activation_fn=tf.identity)
     fc = tf.contrib.layers.batch_norm(fc)
@@ -90,15 +90,14 @@ def fc_bn_lrelu(inputs, num_outputs):
 
 def fc_lrelu(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            activation_fn=tf.identity)
     fc = lrelu(fc)
     return fc
 
 def fc_bn_relu(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
-                                           weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            activation_fn=tf.identity)
     fc = tf.contrib.layers.batch_norm(fc)
     fc = tf.nn.relu(fc)
@@ -106,8 +105,7 @@ def fc_bn_relu(inputs, num_outputs):
 
 def fc_relu(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
-                                           weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            activation_fn=tf.identity)
     fc = tf.nn.relu(fc)
     return fc
@@ -115,9 +113,15 @@ def fc_relu(inputs, num_outputs):
 def fc_tanh(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
                                            weights_initializer=tf.contrib.layers.xavier_initializer(),
-                                           weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                            activation_fn=tf.identity)
-    # fc = tf.layers.dense(inputs, num_outputs, kernel_initializer=tf.contrib.layers.xavier_initializer, activation=tf.identity)
+    fc = tf.nn.tanh(fc)
+    return fc
+
+def fc_bn_tanh(inputs, num_outputs):
+    fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
+                                           activation_fn=tf.identity)
+    fc = tf.contrib.layers.batch_norm(fc)
     fc = tf.nn.tanh(fc)
     return fc
 
