@@ -14,8 +14,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-g', '--gpu', type=str, default='1', help='GPU to use')
 parser.add_argument('-n', '--train_size', type=int, default=50000, help='Number of samples for training')
 parser.add_argument('-e1', '--epsilon1', type=float, default=114.0)
+parser.add_argument('-e2', '--epsilon2', type=float, default=0.15)
 parser.add_argument('-m', '--mi', type=float, default=-5.0, help='Information Preference')
 parser.add_argument('-l1', '--lambda1', type=float, default=1.0)
+parser.add_argument('-l2', '--lambda2', type=float, default=10.0)
 parser.add_argument('-z', type=int, default=5)
 parser.add_argument('-t', type=str, default='cnn')
 parser.add_argument('--lagrangian', action='store_true')
@@ -27,9 +29,9 @@ batch_size = 200
 
 def make_model_path(name):
     if args.lagrangian:
-        log_path = os.path.join('log/lagrangian_stein', name)
+        log_path = os.path.join('log/lagrangian', name)
     else:
-        log_path = os.path.join('log/infovae_stein', name)
+        log_path = os.path.join('log/infovae', name)
     if os.path.isdir(log_path):
         subprocess.call(('rm -rf %s' % log_path).split())
     os.makedirs(log_path)
@@ -37,10 +39,14 @@ def make_model_path(name):
 
 
 if args.lagrangian:
-    log_path = make_model_path('%s/%d/%.2f_%.2f' % (args.t, args.z, args.mi, args.epsilon1))
+    name_append = '_lag'
 else:
-    log_path = make_model_path('%s/%d/%.2f_%.2f' % (args.t, args.z, args.mi, args.lambda1))
+    name_append = ''
 
+if args.lagrangian:
+    log_path = make_model_path('%s/%d/%.2f_%.2f_%.2f%s' % (args.t, args.z, args.mi, args.epsilon1, args.epsilon2, name_append))
+else:
+    log_path = make_model_path('%s/%d/%.2f_%.2f_%.2f%s' % (args.t, args.z, args.mi, args.lambda1, args.lambda2, name_append))
 
 # Encoder and decoder use the DC-GAN architecture
 # 28 x 28 x 1
@@ -121,22 +127,18 @@ def compute_mmd(x, y):   # [batch_size, z_dim] [batch_size, z_dim]
     return tf.reduce_mean(x_kernel) + tf.reduce_mean(y_kernel) - 2 * tf.reduce_mean(xy_kernel)
 
 
-# x_sample is input of size (batch_size, dim)
-def tf_stein_gradient(x_sample, sigma_sqr):
-    x_size = x_sample.get_shape()[0].value
-    x_dim = x_sample.get_shape()[1].value
-    x_sample = tf.reshape(x_sample, [x_size, 1, x_dim])
-    sample_mat_y = tf.tile(x_sample, (1, x_size, 1))
-    sample_mat_x = tf.transpose(sample_mat_y, perm=(1, 0, 2))
-    kernel_matrix = tf.exp(-tf.reduce_sum(tf.square(sample_mat_x - sample_mat_y), axis=2) / (2 * sigma_sqr * x_dim))
-    # np.multiply(-self.kernel(x, y), np.divide(x - y, self.sigma_sqr))./
-    tiled_kernel = tf.tile(tf.reshape(kernel_matrix, [x_size, x_size, 1]), [1, 1, x_dim])
-    kernel_grad_matrix = tf.multiply(tiled_kernel, tf.div(sample_mat_y - sample_mat_x, sigma_sqr * x_dim))
-    gradient = tf.reshape(-x_sample, [x_size, 1, x_dim])  # Gradient of standard Gaussian
-    tiled_gradient = tf.tile(gradient, [1, x_size, 1])
-    weighted_gradient = tf.multiply(tiled_kernel, tiled_gradient)
-    return tf.div(tf.reduce_sum(weighted_gradient, axis=0) +
-                  tf.reduce_sum(kernel_grad_matrix, axis=1), x_size)
+def stein_gradient(x, x_grad, sigma):
+    x_size = x.get_shape()[0].value
+    x_dim = x.get_shape()[1].value
+    xm = tf.reshape(x, [1, x_size, x_dim])
+    xm = tf.tile(xm, (x_size, 1, 1))
+    ym = tf.reshape(x, [x_size, 1, x_dim])
+    ym = tf.tile(ym, (1, x_size, 1))
+    km = tf.exp(-tf.reduce_sum(tf.square(xm - ym), axis=2) / (2.0 * sigma * sigma * x_dim))
+    tk = tf.tile(tf.expand_dims(km, axis=2), [1, 1, x_dim])
+    km_grad = -(ym - xm) / (sigma * sigma * x_dim) * tk
+    km_grad = tf.reduce_sum(km_grad, axis=1)
+    return (tf.matmul(km, x_grad) + km_grad) / x_size
 
 
 # Compare the generated z with true samples from a standard Gaussian, and compute their MMD distance
@@ -153,26 +155,28 @@ nll_per_sample = -tf.reduce_sum(tf.log(train_xmean) * train_x + tf.log(1 - train
                                 axis=(1, 2, 3))
 loss_nll = tf.reduce_mean(nll_per_sample)
 
-stein_grad = tf.stop_gradient(tf_stein_gradient(train_z, 1.0))
-loss_stein = -tf.reduce_sum(tf.multiply(train_z, stein_grad))
-
 if args.lagrangian:
-    lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(50.0))
+    lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(2.0 * args.mi))
+    lambda2 = tf.get_variable('lambda2', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(2.0 * args.mi))
 else:
     lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda1))
+    lambda2 = tf.get_variable('lambda2', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda2))
 # Cannot simply use clipping here because once at max/min there is no more gradient
-lambda_ub = tf.assign(lambda1, tf.minimum(lambda1, 100.0))
-lambda_lb = tf.assign(lambda1, tf.maximum(lambda1, 0.0))  # Consider lower bounding at args.mi
-lambda_clip = [lambda_ub, lambda_lb]
+lambda1_ub = tf.assign(lambda1, tf.minimum(lambda1, 100.0))
+lambda1_lb = tf.assign(lambda1, tf.maximum(lambda1, np.maximum(args.mi + 1e-4, 0.0)))
+lambda2_ub = tf.assign(lambda2, tf.minimum(lambda2, 100.0))
+lambda2_lb = tf.assign(lambda2, tf.maximum(lambda2, -lambda1 + args.mi))
+lambda_clip = [lambda1_ub, lambda1_lb, lambda2_ub, lambda2_lb]
 
-loss_all = lambda1 * loss_nll + (lambda1 - args.mi) * loss_elbo + args.mi * loss_stein - args.epsilon1 * lambda1
+loss_all = lambda1 * loss_nll + (lambda2 + args.mi - lambda1) * loss_mmd\
+           + (lambda1 - args.mi) * loss_elbo - args.epsilon1 * lambda1 - args.epsilon2 * lambda2
 
-lambda_vars = [lambda1]
+lambda_vars = [lambda1, lambda2]
 model_vars = [var for var in tf.global_variables() if 'encoder' in var.name or 'decoder' in var.name]
 # optimizer = tf.train.AdamOptimizer(1e-4)
 # grads = tf.gradients(loss_all, model_vars)
 trainer = tf.train.AdamOptimizer(1e-4).minimize(loss_all, var_list=model_vars)
-lambda_update = tf.train.GradientDescentOptimizer(5e-4).minimize(-loss_all, var_list=lambda_vars)
+lambda_update = tf.train.GradientDescentOptimizer(1e-4).minimize(-loss_all, var_list=lambda_vars)
 
 limited_mnist = LimitedMnist(args.train_size)
 
@@ -182,7 +186,7 @@ train_summary = tf.summary.merge([
     tf.summary.scalar('mmd', loss_mmd),
     tf.summary.scalar('loss', loss_all),
     tf.summary.scalar('lambda1', lambda1),
-    tf.summary.scalar('stein', loss_stein),
+    tf.summary.scalar('lambda2', lambda2),
 ])
 
 sample_summary = tf.summary.merge([
