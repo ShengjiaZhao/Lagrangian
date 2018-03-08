@@ -18,7 +18,7 @@ fc_layer = tf.contrib.layers.fully_connected
 
 def conv2d_bn_lrelu(inputs, num_outputs, kernel_size, stride):
     conv = tf.contrib.layers.convolution2d(inputs, num_outputs, kernel_size, stride,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer,
                                            weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                            activation_fn=tf.identity)
     conv = tf.contrib.layers.batch_norm(conv)
@@ -114,9 +114,10 @@ def fc_relu(inputs, num_outputs):
 
 def fc_tanh(inputs, num_outputs):
     fc = tf.contrib.layers.fully_connected(inputs, num_outputs,
-                                           weights_initializer=tf.random_normal_initializer(stddev=0.02),
+                                           weights_initializer=tf.contrib.layers.xavier_initializer(),
                                            weights_regularizer=tf.contrib.layers.l2_regularizer(2.5e-5),
                                            activation_fn=tf.identity)
+    # fc = tf.layers.dense(inputs, num_outputs, kernel_initializer=tf.contrib.layers.xavier_initializer, activation=tf.identity)
     fc = tf.nn.tanh(fc)
     return fc
 
