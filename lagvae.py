@@ -24,14 +24,15 @@ parser.add_argument('--lagrangian', action='store_true')
 args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-batch_size = 200
+batch_size = 100
 
 
 def make_model_path(name):
     if args.lagrangian:
         log_path = os.path.join('log/lagrangian', name)
     else:
-        log_path = os.path.join('log/infovae', name)
+        log_path = os.path.join('log/infovae_adam', name)
+    print(log_path)
     if os.path.isdir(log_path):
         subprocess.call(('rm -rf %s' % log_path).split())
     os.makedirs(log_path)
@@ -50,61 +51,96 @@ else:
 
 # Encoder and decoder use the DC-GAN architecture
 # 28 x 28 x 1
+# def encoder(x, z_dim):
+#     if args.t == 'cnn':
+#         with tf.variable_scope('encoder'):
+#             conv = conv2d_bn_lrelu(x, 64, 4, 2)   # None x 14 x 14 x 64
+#             conv = conv2d_bn_lrelu(conv, 128, 4, 2)   # None x 7 x 7 x 128
+#             conv = tf.reshape(conv, [-1, np.prod(conv.get_shape().as_list()[1:])]) # None x (7x7x128)
+#             fc = fc_bn_lrelu(conv, 1024)
+#             mean = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.identity)
+#             stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.exp)
+#             return mean, stddev
+#     elif args.t == 'cnns':
+#         with tf.variable_scope('encoder'):
+#             conv = conv2d_bn_lrelu(x, 32, 4, 2)   # None x 14 x 14 x 64
+#             conv = conv2d_bn_lrelu(conv, 64, 4, 2)   # None x 7 x 7 x 128
+#             conv = tf.reshape(conv, [-1, np.prod(conv.get_shape().as_list()[1:])]) # None x (7x7x128)
+#             fc = fc_bn_lrelu(conv, 1024)
+#             mean = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.identity)
+#             stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.exp)
+#             # stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.sigmoid)
+#             # stddev = tf.maximum(stddev, 0.05)
+#             # mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
+#             return mean, stddev
+#     else:
+#         with tf.variable_scope('encoder'):
+#             x = tf.reshape(x, [-1, 784])
+#             fc1 = fc_tanh(x, 1024)
+#             fc2 = fc_tanh(fc1, 1024)
+#             mean = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.identity)
+#             stdv = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.exp)
+#             return mean, stdv
+#
+#
+# def decoder(z, reuse=False):
+#     if args.t == 'cnn':
+#         with tf.variable_scope('decoder') as vs:
+#             if reuse:
+#                 vs.reuse_variables()
+#             fc = fc_bn_relu(z, 1024)
+#             fc = fc_bn_relu(fc, 7*7*128)
+#             conv = tf.reshape(fc, tf.stack([tf.shape(fc)[0], 7, 7, 128]))
+#             conv = conv2d_t_bn_relu(conv, 64, 4, 2)
+#             mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.identity)
+#             # mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.sigmoid)
+#             # mean = tf.maximum(tf.minimum(mean, 0.995), 0.005)
+#             return mean
+#     elif args.t == 'cnns':
+#         with tf.variable_scope('decoder') as vs:
+#             if reuse:
+#                 vs.reuse_variables()
+#             fc = fc_bn_relu(z, 1024)
+#             fc = fc_bn_relu(fc, 7*7*64)
+#             conv = tf.reshape(fc, tf.stack([tf.shape(fc)[0], 7, 7, 64]))
+#             conv = conv2d_t_bn_relu(conv, 32, 4, 2)
+#             mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.identity)
+#             # mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.sigmoid)
+#             # mean = tf.maximum(tf.minimum(mean, 0.995), 0.005)
+#             return mean
+#     else:
+#         with tf.variable_scope('decoder', reuse=reuse):
+#             fc1 = fc_tanh(z, 1024)
+#             fc2 = fc_tanh(fc1, 1024)
+#             logits = tf.contrib.layers.fully_connected(fc2, 784, activation_fn=tf.identity)
+#             # logits = tf.reshape(logits, [-1, 28, 28, 1])
+#             return logits # tf.minimum(tf.maximum(tf.sigmoid(logits), 0.005), 0.995)
+
 def encoder(x, z_dim):
-    if args.t == 'cnn':
-        with tf.variable_scope('encoder'):
-            conv = conv2d_lrelu(x, 64, 4, 2)   # None x 14 x 14 x 64
-            conv = conv2d_lrelu(conv, 128, 4, 2)   # None x 7 x 7 x 128
-            conv = tf.reshape(conv, [-1, np.prod(conv.get_shape().as_list()[1:])]) # None x (7x7x128)
-            fc = fc_lrelu(conv, 1024)
-            mean = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.identity)
-            stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.exp)
-            # stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.sigmoid)
-            # stddev = tf.maximum(stddev, 0.05)
-            # mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
-            return mean, stddev
-    else:
-        with tf.variable_scope('encoder'):
-            x = tf.reshape(x, [-1, 784])
-            fc1 = fc_tanh(x, 200)
-            fc2 = fc_tanh(fc1, 200)
-            mean = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.identity)
-            stdv = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.exp)
-            # stdv = tf.maximum(stdv, 0.05)
-            # mean = tf.maximum(tf.minimum(mean, 10.0), -10.0)
-            return mean, stdv
+    with tf.variable_scope('encoder'):
+        fc1 = fc_tanh(x, 1024)
+        fc2 = fc_tanh(fc1, 1024)
+        mean = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.identity)
+        stdv = tf.contrib.layers.fully_connected(fc2, z_dim, activation_fn=tf.exp)
+        # stdv = tf.maximum(stdv, 0.1)
+        return mean, stdv
 
 
 def decoder(z, reuse=False):
-    if args.t == 'cnn':
-        with tf.variable_scope('decoder') as vs:
-            if reuse:
-                vs.reuse_variables()
-            fc = fc_relu(z, 1024)
-            fc = fc_relu(fc, 7*7*128)
-            conv = tf.reshape(fc, tf.stack([tf.shape(fc)[0], 7, 7, 128]))
-            conv = conv2d_t_relu(conv, 64, 4, 2)
-            mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.identity)
-            # mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.sigmoid)
-            # mean = tf.maximum(tf.minimum(mean, 0.995), 0.005)
-            return mean
-    else:
-        with tf.variable_scope('decoder', reuse=reuse):
-            fc1 = fc_tanh(z, 200)
-            fc2 = fc_tanh(fc1, 200)
-            logits = tf.contrib.layers.fully_connected(fc2, 784, activation_fn=tf.identity)
-            logits = tf.reshape(logits, [-1, 28, 28, 1])
-            return logits # tf.minimum(tf.maximum(tf.sigmoid(logits), 0.005), 0.995)
+    with tf.variable_scope('decoder', reuse=reuse):
+        fc1 = fc_tanh(z, 1024)
+        fc2 = fc_tanh(fc1, 1024)
+        logits = tf.contrib.layers.fully_connected(fc2, 784, activation_fn=tf.identity)
+        return logits
 
 
 # Build the computation graph for training
 z_dim = args.z
 x_dim = [28, 28, 1]
-train_x = tf.placeholder(tf.float32, shape=[None] + x_dim)
+train_x = tf.placeholder(tf.float32, shape=[None] + [784])
 train_zmean, train_zstddev = encoder(train_x, z_dim)
-train_z = train_zmean + tf.multiply(tf.exp(train_zstddev),
-                                    tf.random_normal(tf.stack([tf.shape(train_x)[0], z_dim])))
-zstddev_logdet = tf.reduce_mean(tf.reduce_sum(2.0 * train_zstddev, axis=1))
+train_z = train_zmean + tf.multiply(train_zstddev, tf.random_normal(tf.stack([tf.shape(train_x)[0], z_dim])))
+zstddev_logdet = tf.reduce_mean(tf.reduce_sum(2.0 * tf.log(train_zstddev + 1e-8), axis=1))
 
 train_xmean = decoder(train_z)
 
@@ -146,10 +182,10 @@ def stein_gradient(x, x_grad, sigma):
 # Compare the generated z with true samples from a standard Gaussian, and compute their MMD distance
 true_samples = tf.random_normal(tf.stack([batch_size, z_dim]))
 # ELBO loss divided by input dimensions
-elbo_per_sample = tf.reduce_sum(-train_zstddev + 0.5 * tf.square(tf.exp(train_zstddev)) +
+elbo_per_sample = tf.reduce_sum(-tf.log(1e-8 + train_zstddev) + 0.5 * tf.square(train_zstddev) +
                                 0.5 * tf.square(train_zmean) - 0.5, axis=1)
 # Negative log likelihood per dimension
-nll_per_sample = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=train_x, logits=train_xmean), axis=(1, 2, 3))
+nll_per_sample = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=train_x, logits=train_xmean), axis=(1,))
                  # -tf.reduce_sum(tf.log(train_xmean) * train_x + tf.log(1 - train_xmean) * (1 - train_x),
                  #                axis=(1, 2, 3))
 
@@ -181,10 +217,11 @@ else:
 
 lambda_vars = [lambda1, lambda2]
 model_vars = [var for var in tf.global_variables() if 'encoder' in var.name or 'decoder' in var.name]
-trainer = tf.train.AdamOptimizer(1e-4).minimize(loss_all, var_list=model_vars)
-lambda_update = tf.train.GradientDescentOptimizer(1e-4).minimize(-loss_all, var_list=lambda_vars)
+lr = tf.placeholder(tf.float32, shape=[])
+trainer = tf.train.AdamOptimizer(1e-4, beta1=0.9, beta2=0.999).minimize(loss_all, var_list=model_vars)
+lambda_update = tf.train.GradientDescentOptimizer(lr).minimize(-loss_all, var_list=lambda_vars)
 
-limited_mnist = LimitedMnist(args.train_size)
+limited_mnist = LimitedMnist(args.train_size, binary=True)
 
 train_summary = tf.summary.merge([
     tf.summary.scalar('train/elbo', loss_elbo),
@@ -193,6 +230,7 @@ train_summary = tf.summary.merge([
     tf.summary.scalar('train/loss', loss_all),
     tf.summary.scalar('train/lambda1', lambda1),
     tf.summary.scalar('train/lambda2', lambda2),
+    tf.summary.scalar('train/vae_loss', loss_elbo + loss_nll)
 ])
 
 test_summary = tf.summary.merge([
@@ -219,29 +257,39 @@ summary_writer = tf.summary.FileWriter(log_path)
 
 # Start training
 # plt.ion()
+lr_ = 1e-4
+epoch = 500 * 5
 for i in range(500000):
-    bx = limited_mnist.next_batch(batch_size)
-    bx = np.reshape(bx, [-1] + x_dim)
+    bx = limited_mnist.next_full_batch(batch_size)
+    bx = np.reshape(bx, [-1] + [784])
 
     if args.lagrangian:
-        sess.run([trainer, lambda_update], feed_dict={train_x: bx})
+        sess.run([trainer, lambda_update], feed_dict={train_x: bx, lr: lr_})
     else:
-        sess.run(trainer, feed_dict={train_x: bx})
+        sess.run(trainer, feed_dict={train_x: bx, lr: lr_})
     sess.run(lambda_clip)
 
     if i % 100 == 0:
         merged = sess.run(train_summary, feed_dict={train_x: bx})
         summary_writer.add_summary(merged, i)
-        if i % 1000 == 0:
-            print("Iteration %d" % i)
+        elbo, nll = sess.run([loss_elbo, loss_nll],
+                     feed_dict={train_x: bx})
+        print("Iteration %d: all %.4f nll %.4f elbo %.4f" % (i, nll + elbo, nll, elbo))
+
     if i % 500 == 0:
         bx = limited_mnist.next_batch(100)
+        bx = np.reshape(bx, [-1] + [784])
         bz = np.random.normal(size=(100, z_dim))
         summary_val = sess.run(sample_summary, feed_dict={train_x: bx, gen_z: bz})
         summary_writer.add_summary(summary_val, i)
 
     if i % 1000 == 0:
-        bx = limited_mnist.next_test_batch(500)
+        bx = limited_mnist.next_test_batch(100)
+        bx = np.reshape(bx, [-1] + [784])
         merged = sess.run(test_summary, feed_dict={train_x: bx})
         summary_writer.add_summary(merged, i)
 
+    if i == epoch:
+        lr_ = lr_ * 0.1
+        epoch = epoch * 5
+        print('learning rate {}'.format(lr_))
