@@ -28,7 +28,7 @@ parser.add_argument('--no_eval', action='store_true')
 args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-batch_size = 200
+batch_size = 100
 
 
 def make_model_path(name):
@@ -53,10 +53,11 @@ else:
 def encoder(x, z_dim):
     if args.t == 'cnn':
         with tf.variable_scope('encoder'):
-            conv = conv2d_lrelu(x, 64, 4, 2)   # None x 14 x 14 x 64
-            conv = conv2d_lrelu(conv, 128, 4, 2)   # None x 7 x 7 x 128
+            conv = conv2d_bn_lrelu(x, 64, 4, 2)   # None x 14 x 14 x 64
+            conv = conv2d_bn_lrelu(conv, 128, 4, 2)   # None x 7 x 7 x 128
+            conv = conv2d_bn_lrelu(conv, 128, 4, 1)  # None x 7 x 7 x 128
             conv = tf.reshape(conv, [-1, np.prod(conv.get_shape().as_list()[1:])]) # None x (7x7x128)
-            fc = fc_lrelu(conv, 1024)
+            fc = fc_bn_lrelu(conv, 1024)
             mean = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.identity)
             stddev = tf.contrib.layers.fully_connected(fc, z_dim, activation_fn=tf.sigmoid)
             stddev = tf.maximum(stddev, 0.05)
@@ -79,20 +80,20 @@ def decoder(z, reuse=False):
         with tf.variable_scope('decoder') as vs:
             if reuse:
                 vs.reuse_variables()
-            fc = fc_relu(z, 1024)
-            fc = fc_relu(fc, 7*7*128)
+            fc = fc_bn_relu(z, 1024)
+            fc = fc_bn_relu(fc, 7*7*128)
             conv = tf.reshape(fc, tf.stack([tf.shape(fc)[0], 7, 7, 128]))
-            conv = conv2d_t_relu(conv, 64, 4, 2)
-            mean = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.sigmoid)
-            mean = tf.maximum(tf.minimum(mean, 0.995), 0.005)
-            return mean
+            conv = conv2d_t_bn_relu(conv, 128, 4, 1)
+            conv = conv2d_t_bn_relu(conv, 64, 4, 2)
+            logits = tf.contrib.layers.convolution2d_transpose(conv, 1, 4, 2, activation_fn=tf.identity)
+            return logits
     else:
         with tf.variable_scope('decoder', reuse=reuse):
             fc1 = fc_tanh(z, 1024)
             fc2 = fc_tanh(fc1, 1024)
             logits = tf.contrib.layers.fully_connected(fc2, 784, activation_fn=tf.identity)
             logits = tf.reshape(logits, [-1, 28, 28, 1])
-            return tf.minimum(tf.maximum(tf.sigmoid(logits), 0.005), 0.995)
+            return logits
 
 
 # Build the computation graph for training
@@ -102,13 +103,12 @@ train_x = tf.placeholder(tf.float32, shape=[None] + x_dim)
 train_zmean, train_zstddev = encoder(train_x, z_dim)
 train_z = train_zmean + tf.multiply(train_zstddev,
                                     tf.random_normal(tf.stack([tf.shape(train_x)[0], z_dim])))
-zstddev_logdet = tf.reduce_mean(tf.reduce_sum(2.0 * tf.log(train_zstddev), axis=1))
 
-train_xmean = decoder(train_z)
+train_xlogit = decoder(train_z)
 
 # Build the computation graph for generating samples
 gen_z = tf.placeholder(tf.float32, shape=[None, z_dim])
-gen_xmean = decoder(gen_z, reuse=True)
+gen_xmean = tf.sigmoid(decoder(gen_z, reuse=True))
 
 
 def compute_kernel(x, y):
@@ -129,7 +129,7 @@ def compute_mmd(x, y):   # [batch_size, z_dim] [batch_size, z_dim]
 
 # Compare the generated z with true samples from a standard Gaussian, and compute their MMD distance
 true_samples = tf.random_normal(tf.stack([batch_size, z_dim]))
-loss_mmd = compute_mmd(true_samples, train_z) * 50.0
+loss_mmd = compute_mmd(true_samples, train_z) * 100.0
 
 # ELBO loss divided by input dimensions
 zkl_per_sample = tf.reduce_sum(-tf.log(train_zstddev) + 0.5 * tf.square(train_zstddev) +
@@ -137,10 +137,11 @@ zkl_per_sample = tf.reduce_sum(-tf.log(train_zstddev) + 0.5 * tf.square(train_zs
 loss_zkl = tf.reduce_mean(zkl_per_sample)
 
 # Negative log likelihood per dimension
-nll_per_sample = -tf.reduce_sum(tf.log(train_xmean) * train_x + tf.log(1 - train_xmean) * (1 - train_x),
-                                axis=(1, 2, 3))
+nll_per_sample = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=train_x, logits=train_xlogit), axis=(1, 2, 3))
 loss_nll = tf.reduce_mean(nll_per_sample)
-loss_elbo = loss_zkl + loss_nll
+
+zkl_anneal = tf.placeholder_with_default(1.0, [])
+loss_elbo = loss_zkl * zkl_anneal + loss_nll
 
 if args.lagrangian:
     lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(50.0))
@@ -192,9 +193,8 @@ eval_summary = tf.summary.merge([
 ])
 
 sample_summary = tf.summary.merge([
-    create_display(tf.reshape(train_x, [100] + x_dim), 'dataset'),
-    create_display(tf.reshape(gen_xmean, [100] + x_dim), 'samples'),
-    create_display(tf.reshape(train_xmean, [100] + x_dim), 'reconstruction'),
+    create_display(tf.slice(gen_xmean, [0, 0, 0, 0], [100] + x_dim), 'samples'),
+    create_display(tf.slice(tf.sigmoid(train_xlogit), [0, 0, 0, 0], [100] + x_dim), 'reconstruction'),
 ])
 
 gpu_options = tf.GPUOptions(allow_growth=True)
@@ -217,64 +217,10 @@ class ModelWrapper:
 ll_evaluator = LLEvaluator(model=ModelWrapper())
 
 
-def estimate_mi():
-    start_time = time.time()
-    print("Estimating MI")
-    means, stddevs = [], []
-    for j in range(200):
-        bx = limited_mnist.next_full_batch(batch_size)
-        mean, stddev = sess.run([train_zmean, train_zstddev], feed_dict={train_x: bx})
-        means.append(mean)
-        stddevs.append(stddev)
-    train_mean = np.concatenate(means, axis=0)
-    train_stddev = np.concatenate(stddevs, axis=0)
-
-    print("Extracted training samples, time elapsed=%.2f" % (time.time() - start_time))
-
-    values = []
-    for k in range(2):
-        values.append(train_mean + train_stddev * np.random.normal(size=train_stddev.shape))
-    values = np.concatenate(values, axis=0)
-    kernel = stats.gaussian_kde(values.transpose())
-
-    print("Trained kernel, time elapsed=%.2f" % (time.time() - start_time))
-
-    # Estimate Mutual Information on training set
-    means, stddevs = [], []
-    for j in range(20):
-        bx = limited_mnist.next_test_batch(batch_size)
-        mean, stddev = sess.run([train_zmean, train_zstddev], feed_dict={train_x: bx})
-        means.append(mean)
-        stddevs.append(stddev)
-    test_mean = np.concatenate(means, axis=0)
-    test_stddev = np.concatenate(stddevs, axis=0)
-
-    print("Extracted testing samples, time elapsed=%.2f" % (time.time() - start_time))
-
-    log_q_z_x = np.sum(-0.5 * np.log(2 * math.pi * math.e) - np.log(train_stddev), axis=1)
-    log_r_z = np.zeros(shape=(train_mean.shape[0],))
-    for k in range(2):
-        samples = train_mean + train_stddev * np.random.normal(size=train_stddev.shape)
-        log_r_z += kernel.logpdf(samples.transpose())
-        print("Computed training MI iter %d, time elapsed=%.2f" % (k, time.time() - start_time))
-    log_r_z /= 2.0
-    train_mi = np.mean(log_q_z_x - log_r_z)
-
-    log_q_z_x = np.sum(-0.5 * np.log(2 * math.pi * math.e) - np.log(test_stddev), axis=1)
-    log_r_z = np.zeros(shape=(test_mean.shape[0],))
-    for k in range(2):
-        samples = test_mean + test_stddev * np.random.normal(size=test_stddev.shape)
-        log_r_z += kernel.logpdf(samples.transpose())
-        print("Computed testing MI iter %d, time elapsed=%.2f" % (k, time.time() - start_time))
-    log_r_z /= 2.0
-    test_mi = np.mean(log_q_z_x - log_r_z)
-    return train_mi, test_mi
-
-
-initial_steps = 200000
+initial_steps = 100000
 for i in range(1, initial_steps):
     bx = limited_mnist.next_batch(batch_size)
-    sess.run(trainer1, feed_dict={train_x: bx})
+    sess.run(trainer1, feed_dict={train_x: bx, zkl_anneal: 1.0 - math.exp(-i / 20000.0)})
     if i % 100 == 0:
         merged = sess.run(train_summary, feed_dict={train_x: bx, epsilon1_ph: 0.0, epsilon2_ph: 0.0})
         summary_writer.add_summary(merged, i)
@@ -282,8 +228,8 @@ for i in range(1, initial_steps):
             print("Iteration %d" % i)
 
     if i % 500 == 0:
-        bx = limited_mnist.next_batch(100)
-        bz = np.random.normal(size=(100, z_dim))
+        bx = limited_mnist.next_batch(batch_size)
+        bz = np.random.normal(size=(batch_size, z_dim))
         summary_val = sess.run(sample_summary, feed_dict={train_x: bx, gen_z: bz})
         summary_writer.add_summary(summary_val, i)
 
@@ -295,8 +241,8 @@ for i in range(100):
     epsilon2 += mmd_val
 epsilon1 /= 100.0
 epsilon2 /= 100.0
-epsilon1 *= 1.05
-epsilon2 *= 1.1
+epsilon1 += 4.0
+epsilon2 *= 1.2
 
 # Start training
 # plt.ion()
@@ -328,8 +274,8 @@ for i in range(initial_steps, 1000000):
             print("Iteration %d" % i)
 
     if i % 500 == 0:
-        bx = limited_mnist.next_batch(100)
-        bz = np.random.normal(size=(100, z_dim))
-        summary_val = sess.run(sample_summary, feed_dict={train_x: bx, epsilon1_ph: epsilon1, epsilon2_ph: epsilon2})
+        bx = limited_mnist.next_batch(batch_size)
+        bz = np.random.normal(size=(batch_size, z_dim))
+        summary_val = sess.run(sample_summary, feed_dict={train_x: bx, gen_z: bz, epsilon1_ph: epsilon1, epsilon2_ph: epsilon2})
         summary_writer.add_summary(summary_val, i)
 

@@ -49,6 +49,7 @@ class LimitedMnist:
     def binarize(x):
         return (x > np.random.uniform(0.0, 1.0, x.shape)).astype(np.float32)
 
+
 if __name__ == '__main__':
     from matplotlib import pyplot as plt
     limited_mnist = LimitedMnist(200, binary=True)
