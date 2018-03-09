@@ -226,18 +226,6 @@ sample_nll = tf.reduce_sum(sample_nll, axis=(1))
 # negative log likelihood measured by is
 is_nll = loss_elbo_per_sample + loss_nll_per_sample
 
-
-if args.lagrangian:
-    lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(1.0))
-    lambda2 = tf.get_variable('lambda2', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(1.0))
-else:
-    lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda1))
-    lambda2 = tf.get_variable('lambda2', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda2))
-
-lambda1_clip = tf.assign(lambda1, tf.minimum(tf.maximum(lambda1, 0.0), 100.0))
-lambda2_clip = tf.assign(lambda1, tf.minimum(tf.maximum(lambda1, 0.0), 100.0))
-lambda_clip = tf.group(lambda1_clip, lambda2_clip)
-
 if args.lagrangian:
     epsilon1 = args.epsilon1
     epsilon2 = args.epsilon2
@@ -245,13 +233,26 @@ else:
     epsilon1 = 1.0
     epsilon2 = 1.0
 
+if args.lagrangian:
+    lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(epsilon1))
+    lambda2 = tf.get_variable('lambda2', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(epsilon2))
+else:
+    lambda1 = tf.get_variable('lambda1', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda1))
+    lambda2 = tf.get_variable('lambda2', shape=[], dtype=tf.float32, initializer=tf.constant_initializer(args.lambda2))
+
+lambda1_clip = tf.assign(lambda1, tf.minimum(tf.maximum(lambda1, 0.0), 10.0 * epsilon1))
+lambda2_clip = tf.assign(lambda2, tf.minimum(tf.maximum(lambda2, 0.0), 10.0 * epsilon2))
+lambda_clip = tf.group(lambda1_clip, lambda2_clip)
+
+print(epsilon1, epsilon2)
+
 
 if args.mi < 0:
-    loss_all = lambda1 * loss_nll + (lambda1 - args.mi) * loss_elbo + lambda2 * loss_mmd - epsilon1 * lambda1 - epsilon2 * lambda2
+    loss_all = lambda1 / epsilon1 * loss_nll + (lambda1 / epsilon1 - args.mi) * loss_elbo + lambda2 / epsilon2 * loss_mmd - lambda1 - lambda2
 elif args.mi > 0:
-    loss_all = (lambda1 + args.mi) * loss_nll + lambda1 * loss_elbo + lambda2 * loss_mmd - epsilon1 * lambda1 - epsilon2 * lambda2
+    loss_all = (lambda1 / epsilon1 + args.mi) * loss_nll + lambda1 / epsilon1 * loss_elbo + lambda2 / epsilon2 * loss_mmd - lambda1 - lambda2
 else:
-    loss_all = lambda1 * loss_nll + lambda1 * loss_elbo + lambda2 * loss_mmd - epsilon1 * lambda1 - epsilon2 * lambda2
+    loss_all = lambda1 / epsilon1 * loss_nll + lambda1 / epsilon1 * loss_elbo + lambda2 / epsilon2 * loss_mmd - lambda1 - lambda2
 
 # loss_all = loss_nll + (1.0 - args.mi) * loss_elbo
 
@@ -261,7 +262,8 @@ lambda_vars = [lambda1, lambda2]
 model_vars = [var for var in tf.global_variables() if 'encoder' in var.name or 'decoder' in var.name]
 trainer = tf.train.AdamOptimizer(learning_rate, beta1=0.9, beta2=0.999).minimize(loss_all, var_list=model_vars)
 if args.lagrangian:
-    lambda_update = tf.train.GradientDescentOptimizer(1e-4).minimize(-loss_all, var_list=lambda_vars)
+    lambda_update = tf.train.GradientDescentOptimizer(1e-1).minimize(-loss_all, var_list=lambda_vars)
+    l_grad = tf.gradients(-loss_all, lambda_vars)
 else:
     lambda_update = None
 
@@ -351,9 +353,16 @@ if not args.cont:
         if i % 100 == 0:
             merged = sess.run(train_summary, feed_dict={train_x: bx})
             summary_writer.add_summary(merged, i)
-            elbo, nll = sess.run([loss_elbo, loss_nll],
-                                 feed_dict={train_x: bx})
-            print("Iteration %d: all %.4f nll %.4f elbo %.4f" % (i, nll + elbo, nll, elbo))
+            if args.lagrangian:
+                elbo, nll, l1, l2 = sess.run([loss_elbo, loss_nll, lambda1, lambda2],
+                                     feed_dict={train_x: bx})
+                print("Iteration %d: all %.4f nll %.4f elbo %.4f l1 %.4f l2 %.4f" % (i, nll + elbo, nll, elbo, l1, l2))
+                # g = sess.run(l_grad, feed_dict={train_x: bx})
+                # print(g)
+            else:
+                elbo, nll = sess.run([loss_elbo, loss_nll],
+                                     feed_dict={train_x: bx})
+                print("Iteration %d: all %.4f nll %.4f elbo %.4f" % (i, nll + elbo, nll, elbo))
 
         if i % 1000 == 0:
             bx = data.next_test_batch(100)
